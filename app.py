@@ -23,6 +23,19 @@ def clean_text(text):
     return text
 
 
+def adjust_bounding_box(bbox, page_width, page_height):
+    """Adjust bounding box if it exceeds the page boundaries."""
+    x0, top, x1, bottom = bbox
+
+    # Adjust coordinates if they exceed the page boundaries
+    x0 = max(0, x0)
+    top = max(0, top)
+    x1 = min(page_width, x1)
+    bottom = min(page_height, bottom)
+
+    return (x0, top, x1, bottom)
+
+
 def process_page(pdf_path, page_num, resolution=300):
     """Function to process a single page and return its extracted images and text."""
     start_time = time()  # Start timing the page processing
@@ -33,26 +46,44 @@ def process_page(pdf_path, page_num, resolution=300):
             text = page_data.extract_text()
             clean_page_text = clean_text(text)  # Clean the extracted text
 
+            page_width, page_height = page_data.width, page_data.height
+
             for image_idx, image in enumerate(page_data.images):
                 image_bbox = (image["x0"], image["top"], image["x1"], image["bottom"])
-                # Extract the image using the image bounding box
-                extracted_image = (
-                    page_data.within_bbox(image_bbox)
-                    .to_image(resolution=resolution)
-                    .original
-                )
 
-                # Save extracted image using pathlib
-                image_folder = Path("./images")
-                image_folder.mkdir(parents=True, exist_ok=True)
-                image_path = (
-                    image_folder
-                    / f"extracted_image_page_{page_num + 1}_img_{image_idx}.png"
-                )
-                extracted_image.save(image_path)
+                # Adjust the bounding box if it exceeds page boundaries
+                adjusted_bbox = adjust_bounding_box(image_bbox, page_width, page_height)
 
-                # Add image data to list
-                images_data.append({"index": image_idx, "path": str(image_path)})
+                # Check if the bounding box was adjusted
+                if image_bbox != adjusted_bbox:
+                    logger.warning(
+                        f"Adjusted bounding box on page {page_num + 1}: {image_bbox} -> {adjusted_bbox}"
+                    )
+
+                try:
+                    # Extract the image using the adjusted image bounding box
+                    extracted_image = (
+                        page_data.within_bbox(adjusted_bbox)
+                        .to_image(resolution=resolution)
+                        .original
+                    )
+
+                    # Save extracted image using pathlib
+                    image_folder = Path("./images")
+                    image_folder.mkdir(parents=True, exist_ok=True)
+                    image_path = (
+                        image_folder
+                        / f"extracted_image_page_{page_num + 1}_img_{image_idx}.png"
+                    )
+                    extracted_image.save(image_path)
+
+                    # Add image data to list
+                    images_data.append({"index": image_idx, "path": str(image_path)})
+
+                except Exception as e:
+                    logger.error(
+                        f"Failed to process image {image_idx} on page {page_num + 1}: {e}"
+                    )
 
             logger.info(f"Processed page {page_num + 1} successfully.")
             end_time = time()  # End timing
